@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pipeworx-io/cricsheet",
+  "title": "Cricsheet",
+  "description": "cricsheet -- ball-by-ball cricket data collapsed to match / player / team questions (fleet #2975).",
+  "version": "0.1.0",
+  "websiteUrl": "https://pipeworx.io/packs/cricsheet",
+  "repository": {
+    "url": "https://github.com/pipeworx-io/mcp-cricsheet",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://gateway.pipeworx.io/cricsheet/mcp"
+    }
+  ]
+}
