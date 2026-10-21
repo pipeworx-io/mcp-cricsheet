@@ -46,6 +46,8 @@ interface McpToolExport {
  */
 import {
   battingAggregate,
+  chaseCount,
+  chaseMatches,
   bowlingAggregate,
   dataAsOf,
   findMatches,
@@ -128,6 +130,31 @@ const tools: McpToolExport['tools'] = [
         venue: { type: 'string', description: 'Venue name or partial venue name, e.g. "Lord\'s".' },
         player: { type: 'string', description: 'Exact player name as Cricsheet stores it (see cricsheet_player_stats to resolve a partial name first).' },
         limit: { type: 'number', description: 'Max matches to return, 1-200. Default 50.' },
+        offset: { type: 'number', description: 'Pagination offset. Default 0.' },
+      },
+    },
+  },
+  {
+    name: 'cricsheet_chase_search',
+    description:
+      'Compound cricket match search on the second innings (the chase): filter limited-overs matches (ODI, T20I, IPL) by whether the side batting second won or lost, wickets remaining and balls remaining at the end of the chase, date range, season, tournament/event, team, gender and format. Each hit returns target, chase score, wickets lost, balls used, wickets_remaining (10 minus wickets lost) and balls_remaining (scheduled overs minus legal balls bowled; null for rain-affected matches decided by a method such as DLS). Example: T20I chases won with 5+ wickets and 10+ balls to spare since 2024. Source: Cricsheet match data (ODC-BY). Tests are excluded.',
+    summary: 'Find ODI/T20I/IPL chases by result, wickets and balls remaining, date, tournament.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        second_innings_result: { type: 'string', enum: ['won', 'lost', 'any'], description: 'Did the side batting second win? Default "won" (a successful chase).' },
+        format: { type: 'string', description: 'Match format: "ODI", "T20I" or "IPL". Omit for all three.' },
+        min_wickets_remaining: { type: 'number', description: 'Chasing side had at least this many wickets in hand at the end (0-10).' },
+        max_wickets_remaining: { type: 'number', description: 'Chasing side had at most this many wickets in hand at the end (0-10).' },
+        min_balls_remaining: { type: 'number', description: 'At least this many legal balls unused at the end of the chase (assumes full scheduled overs; 120 in T20, 300 in ODI).' },
+        max_balls_remaining: { type: 'number', description: 'At most this many legal balls unused (0 = chase went to the last ball).' },
+        team: { type: 'string', description: 'Chasing team name as Cricsheet uses it, e.g. "India".' },
+        gender: { type: 'string', enum: ['male', 'female'], description: 'Men\'s or women\'s cricket.' },
+        season: { type: 'string', description: 'Season label, e.g. "2024" or "2023/24".' },
+        event: { type: 'string', description: 'Tournament/event name or fragment, e.g. "World Cup" or "Indian Premier League".' },
+        date_from: { type: 'string', description: 'Earliest match date, YYYY-MM-DD.' },
+        date_to: { type: 'string', description: 'Latest match date, YYYY-MM-DD.' },
+        limit: { type: 'number', description: 'Max matches to return, 1-200. Default 25.' },
         offset: { type: 'number', description: 'Pagination offset. Default 0.' },
       },
     },
@@ -404,6 +431,74 @@ async function cricsheetFindMatchesTool(db: D1Like, args: Record<string, unknown
   };
 }
 
+async function cricsheetChaseTool(db: D1Like, args: Record<string, unknown>) {
+  const asOf = await dataAsOf(db);
+  let format: Format | null = null;
+  if (args.format != null && args.format !== '') {
+    format = resolveFormat(args.format);
+    if (!format || format === 'Test') {
+      return { found: false, reason: 'unknown_format', message: `${JSON.stringify(args.format)} is not supported here. Use "ODI", "T20I" or "IPL".`, data_as_of: asOf };
+    }
+  }
+  const r = String(args.second_innings_result ?? 'won').toLowerCase();
+  if (r !== 'won' && r !== 'lost' && r !== 'any') {
+    return { found: false, reason: 'invalid_second_innings_result', message: 'second_innings_result must be "won", "lost" or "any".', data_as_of: asOf };
+  }
+  const num = (v: unknown): number | undefined => (v == null || v === '' || !Number.isFinite(Number(v)) ? undefined : Math.floor(Number(v)));
+  const gender = str(args.gender)?.toLowerCase();
+  const base = {
+    format,
+    team: str(args.team) ?? undefined,
+    gender: gender === 'male' || gender === 'female' ? gender : undefined,
+    season: str(args.season) ?? undefined,
+    event: str(args.event) ?? undefined,
+    date_from: str(args.date_from) ?? undefined,
+    date_to: str(args.date_to) ?? undefined,
+    second_innings_result: r as 'won' | 'lost' | 'any',
+    min_wickets_remaining: num(args.min_wickets_remaining),
+    max_wickets_remaining: num(args.max_wickets_remaining),
+    min_balls_remaining: num(args.min_balls_remaining),
+    max_balls_remaining: num(args.max_balls_remaining),
+  };
+  const limit = clampInt(args.limit, 1, 200, 25);
+  const offset = Math.max(0, Math.floor(Number(args.offset) || 0));
+  const [rows, total] = await Promise.all([chaseMatches(db, { ...base, limit, offset }), chaseCount(db, base)]);
+  if (!total) {
+    return { found: false, reason: 'no_match', message: 'No chases held matching those filters.', hint: 'Loosen a filter; team and season need the exact Cricsheet string, event is substring-matched.', data_as_of: asOf };
+  }
+  const truncated = rows.length + offset < total;
+  return {
+    found: true,
+    total_matching: total,
+    returned: rows.length,
+    truncated,
+    ...(truncated ? { hint: 'More matches exist. Page with limit/offset.' } : {}),
+    note: 'balls_remaining assumes the full scheduled overs (120 T20, 300 ODI) and is null for matches decided by a rain method; Test matches are excluded.',
+    matches: rows.map((m) => ({
+      match_id: m.match_id,
+      format: m.format,
+      gender: m.gender,
+      match_date: m.match_date,
+      season: m.season,
+      event: m.event_name,
+      venue: m.venue,
+      chasing_team: m.chasing_team,
+      target: m.target,
+      chase_score: `${m.chase_runs}/${m.chase_wickets_lost}`,
+      chase_won: m.chase_won === 1,
+      winner: m.outcome_winner,
+      result: m.result,
+      wickets_remaining: m.wickets_remaining,
+      balls_remaining: m.balls_remaining,
+      overs_used: `${Math.floor(m.chase_legal_balls / 6)}.${m.chase_legal_balls % 6}`,
+    })),
+    source: SOURCE,
+    source_url: SOURCE_URL,
+    license: LICENSE,
+    data_as_of: asOf,
+  };
+}
+
 async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   const bound = requireDb(args._d1);
   switch (name) {
@@ -415,6 +510,8 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
       return cricsheetHeadToHeadTool(bound, args);
     case 'cricsheet_find_matches':
       return cricsheetFindMatchesTool(bound, args);
+    case 'cricsheet_chase_search':
+      return cricsheetChaseTool(bound, args);
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

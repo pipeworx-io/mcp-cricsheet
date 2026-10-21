@@ -6,7 +6,7 @@ and a head-to-head record between two teams. Covers Test matches, One Day
 Internationals, T20 Internationals, and the Indian Premier League. Fleet
 #2975.
 
-Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents to 1784+ live data sources. This is an independent, unofficial integration — not affiliated with, endorsed by, or published by the upstream provider.
+Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents to 1855+ live data sources. This is an independent, unofficial integration — not affiliated with, endorsed by, or published by the upstream provider.
 
 ## Tools
 
@@ -27,6 +27,12 @@ Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents 
 - `cricsheet_find_matches(team?, format?, season?, venue?, player?, limit?, offset?)`
   — search the match index to discover `match_id`s. With no filters, returns
   the most recent matches held across every format.
+- `cricsheet_chase_search(second_innings_result?, format?, min/max_wickets_remaining?, min/max_balls_remaining?, team?, gender?, season?, event?, date_from?, date_to?, limit?, offset?)`
+  — compound search on the chase (second innings) in ODI, T20I and IPL
+  matches: did the side batting second win, how many wickets in hand and
+  balls unused at the end, by date, season and tournament. `balls_remaining`
+  assumes the full scheduled overs (120 T20, 300 ODI) and is null for matches
+  decided by a rain method. Tests are excluded.
 
 `format` accepts `"Test"`, `"ODI"`, `"T20I"` (international T20), or `"IPL"`
 (case-insensitive); omit it to search across all four.
@@ -141,7 +147,7 @@ directly, instead of just this one's:
 }
 ```
 
-Both URLs reach the same gateway and the same 1784+ data sources. The
+Both URLs reach the same gateway and the same 1855+ data sources. The
 only difference is which pack's tools are listed **directly**; `ask_pipeworx`
 reaches all of them from either one.
 

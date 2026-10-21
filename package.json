@@ -1,6 +1,6 @@
 {
   "name": "@pipeworx/mcp-cricsheet",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "cricsheet -- ball-by-ball cricket data collapsed to match / player / team questions (fleet #2975).",
   "type": "module",
   "main": "src/index.ts",
@@ -26,7 +26,7 @@
     "@cloudflare/workers-types": "^4.20260405.1"
   },
   "pipeworx": {
-    "sourceHash": "v1-a408bcb18921b17d5b636ede895773b52861f20e397029fca5407c02b9210876",
-    "sourceCommit": "3723e46c6d115bd4a1fd2175e6bf758555e7cb50"
+    "sourceHash": "v1-85a1329407adfe600772c8c55a3a51053ea003583733d42121497021cf9f3f22",
+    "sourceCommit": "5749f83c0ea115fab4c0c0ef04b66b05f2507d67"
   }
 }

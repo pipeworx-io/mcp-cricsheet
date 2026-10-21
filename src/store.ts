@@ -370,3 +370,84 @@ export async function findMatchesCount(db: D1Like, f: Omit<FindMatchesFilter, 'l
   const r = await db.prepare(`SELECT COUNT(*) AS n FROM matches ${whereSql}`).bind(...params).first<{ n: number }>();
   return r?.n ?? 0;
 }
+
+// ---- compound chase search (fleet #3344) ----------------------------------
+export interface ChaseFilter {
+  format?: Format | null;
+  team?: string;
+  gender?: string;
+  season?: string;
+  event?: string;
+  date_from?: string;
+  date_to?: string;
+  /** 'won' = the side batting second won (a successful chase), 'lost' = it lost, 'any'. */
+  second_innings_result: 'won' | 'lost' | 'any';
+  min_wickets_remaining?: number;
+  max_wickets_remaining?: number;
+  min_balls_remaining?: number;
+  max_balls_remaining?: number;
+  limit: number;
+  offset: number;
+}
+export interface ChaseRow {
+  match_id: number;
+  format: string;
+  gender: string;
+  match_date: string;
+  season: string | null;
+  event_name: string | null;
+  venue: string | null;
+  team1: string;
+  team2: string;
+  outcome_winner: string | null;
+  outcome_method: string | null;
+  result: string | null;
+  chasing_team: string;
+  target: number;
+  chase_runs: number;
+  chase_wickets_lost: number;
+  chase_legal_balls: number;
+  wickets_remaining: number;
+  balls_remaining: number | null;
+  chase_won: number;
+}
+
+function chaseFrom(f: Omit<ChaseFilter, 'limit' | 'offset'>): { sql: string; params: unknown[] } {
+  const where: string[] = ['m.format IN (\'ODI\',\'T20I\',\'IPL\')', 'i1.innings_num = 1', 'i2.innings_num = 2'];
+  const params: unknown[] = [];
+  if (f.second_innings_result === 'won') where.push('m.outcome_winner = i2.batting_team');
+  else if (f.second_innings_result === 'lost') where.push('m.outcome_winner IS NOT NULL AND m.outcome_winner <> i2.batting_team');
+  if (f.format) { where.push('m.format = ?'); params.push(f.format); }
+  if (f.team) { where.push('i2.batting_team = ? COLLATE NOCASE'); params.push(f.team); }
+  if (f.gender) { where.push('m.gender = ?'); params.push(f.gender); }
+  if (f.season) { where.push('m.season = ? COLLATE NOCASE'); params.push(f.season); }
+  if (f.event) { where.push('m.event_name LIKE ? COLLATE NOCASE'); params.push(`%${f.event}%`); }
+  if (f.date_from) { where.push('m.match_date >= ?'); params.push(f.date_from); }
+  if (f.date_to) { where.push('m.match_date <= ?'); params.push(f.date_to); }
+  const wr = '(10 - i2.total_wickets)';
+  const br = `(CASE WHEN m.outcome_method IS NOT NULL THEN NULL WHEN m.format = 'ODI' THEN 300 - i2.legal_balls ELSE 120 - i2.legal_balls END)`;
+  if (f.min_wickets_remaining != null) { where.push(`${wr} >= ?`); params.push(f.min_wickets_remaining); }
+  if (f.max_wickets_remaining != null) { where.push(`${wr} <= ?`); params.push(f.max_wickets_remaining); }
+  if (f.min_balls_remaining != null) { where.push(`${br} >= ?`); params.push(f.min_balls_remaining); }
+  if (f.max_balls_remaining != null) { where.push(`${br} <= ?`); params.push(f.max_balls_remaining); }
+  const sql = `FROM matches m JOIN innings i1 ON i1.match_id = m.match_id JOIN innings i2 ON i2.match_id = m.match_id WHERE ${where.join(' AND ')}`;
+  return { sql, params };
+}
+
+export async function chaseMatches(db: D1Like, f: ChaseFilter): Promise<ChaseRow[]> {
+  const { sql, params } = chaseFrom(f);
+  const q = `SELECT m.match_id, m.format, m.gender, m.match_date, m.season, m.event_name, m.venue, m.team1, m.team2,
+      m.outcome_winner, m.outcome_method, m.result, i2.batting_team AS chasing_team, i1.total_runs + 1 AS target,
+      i2.total_runs AS chase_runs, i2.total_wickets AS chase_wickets_lost, i2.legal_balls AS chase_legal_balls,
+      10 - i2.total_wickets AS wickets_remaining,
+      CASE WHEN m.outcome_method IS NOT NULL THEN NULL WHEN m.format = 'ODI' THEN 300 - i2.legal_balls ELSE 120 - i2.legal_balls END AS balls_remaining,
+      CASE WHEN m.outcome_winner = i2.batting_team THEN 1 ELSE 0 END AS chase_won
+    ${sql} ORDER BY m.match_date DESC, m.match_id DESC LIMIT ? OFFSET ?`;
+  const r = await db.prepare(q).bind(...params, f.limit, f.offset).all<ChaseRow>();
+  return r.results;
+}
+export async function chaseCount(db: D1Like, f: Omit<ChaseFilter, 'limit' | 'offset'>): Promise<number> {
+  const { sql, params } = chaseFrom(f);
+  const r = await db.prepare(`SELECT COUNT(*) AS n ${sql}`).bind(...params).first<{ n: number }>();
+  return r?.n ?? 0;
+}
