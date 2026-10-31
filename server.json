@@ -3,7 +3,7 @@
   "name": "io.github.pipeworx-io/cricsheet",
   "title": "Cricsheet",
   "description": "cricsheet -- ball-by-ball cricket data collapsed to match / player / team questions (fleet #2975).",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "websiteUrl": "https://pipeworx.io/packs/cricsheet",
   "repository": {
     "url": "https://github.com/pipeworx-io/mcp-cricsheet",
